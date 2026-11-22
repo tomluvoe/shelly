@@ -28,6 +28,7 @@ DEMO_AREAS = [(slug, name, f"demo-{slug}") for slug, name in [
     ("office", "Office"), ("utility-room", "Utility room"),
 ]]
 MAX_RESPONSE = 1024 * 1024
+AREA_REFRESH_SECONDS = 5 * 60
 
 
 def selected_devices(raw):
@@ -71,7 +72,10 @@ def assign_areas(ids, existing, inventory, payload, app_names):
         else:
             n = next(free_numbers)
             slug, fallback = f"area-{n}", f"Area {n}"
-        name = app_names.get(device_id) or names.get(device_id) or inventory.get(device_id) or fallback
+        if app_names is None and device_id in previous:
+            name = fallback
+        else:
+            name = (app_names or {}).get(device_id) or names.get(device_id) or inventory.get(device_id) or fallback
         areas.append((slug, name, device_id))
     return areas
 
@@ -135,11 +139,8 @@ class CloudClient:
     def app_names(self, ids, stop):
         # The app's account labels may differ from the device settings returned by v2.
         if stop.wait(1):
-            return {}
-        try:
-            devices = self.app_listing("device", "devices")
-        except CloudError:
-            return {}
+            return None
+        devices = self.app_listing("device", "devices")
         devices = {key.lower(): as_object(value) for key, value in devices.items()}
         names = {}
         rooms_by_device = {}
@@ -151,13 +152,12 @@ class CloudClient:
             room_id = device.get("room_id")
             if name:
                 names[device_id] = name
-            elif type(room_id) in (int, str) and str(room_id) not in ("", "-10"):
+            if type(room_id) in (int, str) and str(room_id) not in ("", "-10"):
                 rooms_by_device[device_id] = str(room_id)
-        if rooms_by_device and not stop.wait(1):
-            try:
-                rooms = self.app_listing("room", "rooms")
-            except CloudError:
-                return names
+        if rooms_by_device:
+            if stop.wait(1):
+                return None
+            rooms = self.app_listing("room", "rooms")
             for device_id, room_id in rooms_by_device.items():
                 name = cloud_name(as_object(rooms.get(room_id)).get("name"))
                 if name:
@@ -167,7 +167,10 @@ class CloudClient:
     def app_listing(self, resource, key):
         body = urlencode({"auth_key": self.key}).encode()
         response = self.post(f"/interface/{resource}/list", body, "application/x-www-form-urlencoded")
-        return as_object(as_object(as_object(response).get("data")).get(key))
+        listing = as_object(as_object(response).get("data")).get(key)
+        if not isinstance(listing, dict):
+            raise CloudError(f"Shelly Cloud did not return the Smart Control {resource} list.")
+        return listing
 
     def post(self, path, body, content_type):
         request = Request(self.base + path, data=body, headers={"Content-Type": content_type}, method="POST")
@@ -307,8 +310,7 @@ def collect(archive):
 
     archive.initialize(DEMO_AREAS if demo else None, interval, demo)
     areas = DEMO_AREAS if demo else archive.configured_areas()
-    labels_pending = not demo
-    discovery_pending = labels_pending and manual_ids is None
+    next_area_refresh = 0.0
     stop = Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
@@ -327,8 +329,9 @@ def collect(archive):
                 archive.record(now, demo_readings(now // 3600 * 3600))
                 stop.wait(interval)
                 continue
+            refresh_due = time.monotonic() >= next_area_refresh
             inventory = None
-            if discovery_pending:
+            if refresh_due and manual_ids is None:
                 try:
                     inventory = client.discover()
                 except CloudError as error:
@@ -338,18 +341,23 @@ def collect(archive):
                 if stop.wait(1):
                     break
             ids = list(inventory) if inventory is not None else manual_ids or [device_id for _, _, device_id in areas]
-            configure = labels_pending and (inventory is not None or manual_ids is not None)
+            configure = refresh_due and (inventory is not None or manual_ids is not None)
             payload = client.fetch(ids, include_names=configure)
             now = int(time.time())
             results = normalize(payload, ids, now)
-            updated_areas = None
+            updated_areas = areas
             if configure:
-                app_names = client.app_names(ids, stop)
+                try:
+                    app_names = client.app_names(ids, stop)
+                except CloudError as error:
+                    logging.warning("Could not refresh Smart Control names. %s", error)
+                    app_names = None
                 updated_areas = assign_areas(ids, areas, inventory or {}, payload, app_names)
-            archive.record(now, results, areas=updated_areas)
-            if updated_areas is not None:
+                next_area_refresh = time.monotonic() + AREA_REFRESH_SECONDS
+            changed = updated_areas != areas
+            archive.record(now, results, areas=updated_areas if changed else None)
+            if changed:
                 areas = updated_areas
-                labels_pending = discovery_pending = False
                 logging.info("Configured %d area(s).", len(areas))
             unavailable = sum(values is None for _, _, values in results.values())
             if unavailable:
