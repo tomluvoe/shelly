@@ -1,0 +1,37 @@
+x-runtime: &runtime
+  image: shelly-ht:local
+  build: .
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+
+services:
+  collector:
+    <<: *runtime
+    command: [collect]
+    environment:
+      SHELLY_CLOUD_URL: ${SHELLY_CLOUD_URL:-}
+      SHELLY_CLOUD_KEY: ${SHELLY_CLOUD_KEY:-}
+      SHELLY_DEVICE_IDS: ${SHELLY_DEVICE_IDS:-}
+      SHELLY_POLL_SECONDS: ${SHELLY_POLL_SECONDS:-60}
+      SHELLY_DEMO: ${SHELLY_DEMO:-0}
+    volumes:
+      - history:/data
+
+  dashboard:
+    <<: *runtime
+    command: [serve, --host, 0.0.0.0]
+    ports:
+      - "127.0.0.1:${SHELLY_DASHBOARD_PORT:-8766}:8766"
+    volumes:
+      - history:/data
+    healthcheck:
+      test: [CMD, python, -c, "from urllib.request import urlopen; urlopen('http://127.0.0.1:8766/healthz', timeout=2).close()"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  history:

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Shelly H&amp;T</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead">
+      <a class="brand" href="/">Shelly <span>H&amp;T</span></a>
+      <div class="header-status">
+        <span id="status" class="status" aria-live="polite">Checking collector</span>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+    </header>
+    <main>
+      <noscript><p class="notice">Enable JavaScript to view your sensor readings.</p></noscript>
+      <p id="demo" class="notice demo" hidden>Demo mode · simulated readings</p>
+      <p id="notice" class="notice" role="status" hidden></p>
+      <nav id="area-nav" aria-label="Area dashboards" hidden></nav>
+
+      <section id="hero" class="hero" aria-labelledby="page-title">
+        <p id="area-state" class="area-state" hidden></p>
+        <h1 id="page-title">Climate dashboard</h1>
+        <p id="hero-detail" class="hero-detail">Temperature and humidity from Shelly H&amp;T sensors.</p>
+        <dl id="latest" class="latest" hidden></dl>
+        <div aria-live="polite"><ul id="active-alerts" class="active-alerts" hidden></ul></div>
+      </section>
+
+      <section id="overview" aria-labelledby="areas-title">
+        <h2 id="areas-title">Areas</h2>
+        <div id="cards" class="cards"></div>
+        <p id="empty" class="panel" role="status">Loading configured areas…</p>
+      </section>
+
+      <section id="alert-settings" class="panel" aria-labelledby="alert-title" hidden>
+        <h2 id="alert-title">Alert thresholds</h2>
+        <p id="limit-help" class="limit-help">Leave a limit blank to disable it.</p>
+        <form id="limit-form" aria-describedby="limit-help">
+          <fieldset id="limit-fields">
+            <div class="limit-inputs">
+              <label>Temperature minimum (°C)<input type="number" name="temperature_min" step="any"></label>
+              <label>Temperature maximum (°C)<input type="number" name="temperature_max" step="any"></label>
+              <label>Humidity minimum (%)<input type="number" name="humidity_min" min="0" max="100" step="any"></label>
+              <label>Humidity maximum (%)<input type="number" name="humidity_max" min="0" max="100" step="any"></label>
+            </div>
+            <div class="limit-actions">
+              <button type="submit">Save thresholds</button>
+              <p id="limit-result" role="status"></p>
+            </div>
+          </fieldset>
+        </form>
+      </section>
+
+      <section id="history" aria-labelledby="history-title" hidden>
+        <div class="section-head">
+          <h2 id="history-title">History</h2>
+          <div id="ranges" class="ranges" role="group" aria-label="History range">
+            <button type="button" data-range="24h" aria-pressed="false">24h</button>
+            <button type="button" data-range="7d" aria-pressed="true">7d</button>
+            <button type="button" data-range="30d" aria-pressed="false">30d</button>
+            <button type="button" data-range="1y" aria-pressed="false">1y</button>
+            <button type="button" data-range="all" aria-pressed="false">All</button>
+          </div>
+        </div>
+        <p id="history-info" class="history-info" role="status"></p>
+        <div id="charts" class="charts" hidden>
+          <article class="panel chart">
+            <h3>Temperature <span>°C</span></h3>
+            <canvas id="temperature" aria-label="Temperature over time" role="img"></canvas>
+          </article>
+          <article class="panel chart humid">
+            <h3>Relative humidity <span>%</span></h3>
+            <canvas id="humidity" aria-label="Relative humidity over time" role="img"></canvas>
+          </article>
+        </div>
+        <details id="reading-details" class="panel reading-details" hidden>
+          <summary>Latest plotted values</summary>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th scope="col">Time</th><th scope="col">Temperature</th><th scope="col">Humidity</th><th scope="col">Reports</th></tr></thead>
+              <tbody id="readings"></tbody>
+            </table>
+          </div>
+        </details>
+      </section>
+    </main>
+    <footer id="collector-detail">History is stored locally.</footer>
+  </div>
+</body>
+</html>
