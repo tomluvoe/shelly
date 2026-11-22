@@ -25,7 +25,7 @@ docker compose up -d --build --wait
 docker compose logs -f collector
 ```
 
-Open [the dashboard](http://127.0.0.1:8766/). A configured slug such as `area-1` has its own page at `/areas/area-1/`. The dashboard listens on loopback by default. Use **Refresh** to reload saved data immediately, or leave the tab open for automatic refreshes every 30 seconds. The cloud key and upstream URL go only to the collector container. The sample `.env.example` is safe to commit. Git ignores `.env` and SQLite files, and Docker excludes them from the build context.
+Open [the dashboard](http://127.0.0.1:8766/). A configured slug such as `area-1` has its own page at `/areas/area-1/`. The dashboard listens on loopback by default. Use the refresh button to reload saved data immediately, or leave the tab open for automatic refreshes every 30 seconds. The cloud key and upstream URL go only to the collector container. The sample `.env.example` is safe to commit. Git ignores `.env` and SQLite files, and Docker excludes them from the build context.
 
 ### Device discovery
 
@@ -45,9 +45,9 @@ The 24-hour and 7-day charts show individual readings. Longer views use averages
 
 ## Sensor alerts
 
-Open an area and set any minimums or maximums in **Alert thresholds**. Temperature uses Celsius and humidity uses percent. Leave a field blank to disable that limit. Limits are stored in SQLite per sensor, so renaming a device keeps its thresholds.
+Open an area and set any minimums or maximums in **Alert limits**. Temperature uses Celsius and humidity uses percent. Leave a field blank to disable that limit. Limits are stored in SQLite per sensor, so renaming a device keeps its thresholds.
 
-An area turns red on both the home page and its dashboard when the most recent available value is below a minimum or above a maximum. The warning shows the reading and the limit it crossed. It clears when that metric next reports a value within range or you change the threshold. Warnings appear in the dashboard.
+An area is highlighted on both the home page and its room page when the most recent available value is below a minimum or above a maximum. The warning shows the reading and the limit it crossed. It clears when that metric next reports a value within range or you change the threshold. Warnings appear in the dashboard.
 
 ## Keep or back up the archive
 
@@ -71,4 +71,4 @@ SHELLY_DEMO=1 SHELLY_DASHBOARD_PORT=8767 docker compose --env-file .env.example 
 
 Open [the demo dashboard](http://127.0.0.1:8767/). Stop it with `docker compose --env-file .env.example -p shelly-demo down`.
 
-The layout and local archive workflow are inspired by a GARO charger dashboard.
+The local archive workflow is inspired by a GARO charger dashboard.

@@ -438,16 +438,16 @@ def serve(archive, host, port):
                     self.send_json(503, {"error": "The archive is temporarily unavailable. Check the collector logs."})
                 return
             asset = {
-                "/app.js": ("app.js", "text/javascript"),
-                "/style.css": ("style.css", "text/css"),
+                "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                "/style.css": ("style.css", "text/css; charset=utf-8"),
             }.get(url.path)
             if url.path == "/" or re.fullmatch(r"/areas/[a-z0-9-]+/?", url.path):
-                asset = ("index.html", "text/html")
+                asset = ("index.html", "text/html; charset=utf-8")
             if asset is None:
                 self.send_json(404, {"error": "Page not found."})
                 return
             name, media_type = asset
-            self.send_bytes(200, f"{media_type}; charset=utf-8", (ASSETS / name).read_bytes())
+            self.send_bytes(200, media_type, (ASSETS / name).read_bytes())
 
         def serve_api(self, url):
             if url.path == "/api/areas":

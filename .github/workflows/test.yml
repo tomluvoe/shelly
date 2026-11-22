@@ -1,0 +1,53 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Run application tests
+        run: |
+          python -m unittest discover -s tests -v
+          node --check dashboard/app.js
+      - name: Start the Docker demo and verify sensor history
+        env:
+          SHELLY_DEMO: "1"
+        run: |
+          docker compose --env-file .env.example up -d --build --wait --wait-timeout 60
+          python - <<'PY'
+          import json
+          import time
+          from urllib.request import urlopen
+
+          base = "http://127.0.0.1:8766"
+          for attempt in range(30):
+              with urlopen(f"{base}/api/areas", timeout=5) as response:
+                  overview = json.load(response)
+              if len(overview["areas"]) == 4 and all(area["at"] for area in overview["areas"]):
+                  break
+              time.sleep(1)
+          else:
+              raise SystemExit("The demo did not archive readings for all four areas.")
+
+          slug = overview["areas"][0]["slug"]
+          with urlopen(f"{base}/api/areas/{slug}/history?range=7d", timeout=5) as response:
+              history = json.load(response)
+          if not history["points"]:
+              raise SystemExit("The demo history is empty.")
+          PY
+      - name: Print Docker logs on failure
+        if: failure()
+        run: docker compose --env-file .env.example logs --no-color
