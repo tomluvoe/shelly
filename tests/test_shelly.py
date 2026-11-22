@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
 from archive import Archive
-from shelly import CloudClient, CloudError, collect, normalize, selected_devices, serve
+from shelly import AREA_REFRESH_SECONDS, CloudClient, CloudError, collect, normalize, selected_devices, serve
 
 
 DEVICE_ID = "a1b2c3"
@@ -68,12 +68,12 @@ class CloudTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ID once"):
             selected_devices(f"{DEVICE_ID},{DEVICE_ID.upper()}")
 
-    def test_app_names_use_device_name_and_assigned_room(self):
+    def test_app_names_prefer_assigned_room_over_device_name(self):
         client = CloudClient("https://cloud.example.test", "test-key")
         client.post = MagicMock(side_effect=[
             {"data": {"devices": {
                 DEVICE_ID.upper(): {"name": "Workshop"},
-                str(int(SECOND_ID, 16)): {"name": f"shellyht-{SECOND_ID}", "room_id": 42},
+                str(int(SECOND_ID, 16)): {"name": "Greenhouse sensor", "room_id": 42},
             }}},
             {"data": {"rooms": {"42": {"name": "Greenhouse"}}}},
         ])
@@ -86,7 +86,8 @@ class CloudTest(unittest.TestCase):
             "/interface/device/list", "/interface/room/list",
         ])
         client.post.side_effect = CloudError("Unavailable")
-        self.assertEqual(client.app_names([DEVICE_ID], stop), {})
+        with self.assertRaisesRegex(CloudError, "Unavailable"):
+            client.app_names([DEVICE_ID], stop)
 
 
 class ArchiveTest(unittest.TestCase):
@@ -202,7 +203,7 @@ class ArchiveTest(unittest.TestCase):
         self.archive.set_limits("workshop", BLANK_LIMITS)
         self.assertEqual(self.archive.overview()["areas"][0]["alerts"], [])
 
-    def run_poll(self, env, inventory, payload):
+    def run_poll(self, env, inventory, payload, app_names=None):
         defaults = {"SHELLY_CLOUD_URL": "https://cloud.example.test", "SHELLY_CLOUD_KEY": "test-key"}
         with patch.dict(os.environ, {**defaults, **env}, clear=True), patch("shelly.CloudClient") as client_class, \
                 patch("shelly.Event") as event_class, patch("shelly.signal.signal"):
@@ -214,7 +215,10 @@ class ArchiveTest(unittest.TestCase):
             if isinstance(inventory, CloudError):
                 client.discover.side_effect = inventory
             client.fetch.return_value = payload
-            client.app_names.return_value = {}
+            if isinstance(app_names, CloudError):
+                client.app_names.side_effect = app_names
+            else:
+                client.app_names.return_value = app_names or {}
             collect(self.archive)
             return client
 
@@ -252,6 +256,50 @@ class ArchiveTest(unittest.TestCase):
             client = self.run_poll({}, CloudError("Inventory unavailable"), [])
         client.fetch.assert_called_once_with([DEVICE_ID, SECOND_ID], include_names=False)
         self.assertEqual(self.archive.configured_areas(), AREAS)
+
+    def test_room_lookup_failure_preserves_labels_and_records_readings(self):
+        with self.assertLogs(level="WARNING"):
+            self.run_poll({}, {DEVICE_ID: "Device name", SECOND_ID: None}, [
+                {"id": DEVICE_ID, "settings": {"name": "Device name"}, "status": {"tmp": {"tC": 21}}},
+                {"id": SECOND_ID, "status": {"tmp": {"tC": 18}}},
+            ], app_names=CloudError("Room listing unavailable"))
+        self.assertEqual(self.archive.configured_areas(), AREAS)
+        self.assertEqual(self.archive.overview()["areas"][0]["temperature"], 21)
+
+    def test_running_collector_applies_room_renames_and_new_devices(self):
+        self.record(self.now, self.now, 20)
+        self.archive.set_limits("area-1", {**BLANK_LIMITS, "temperature_max": 22})
+        new_id = "abcdef"
+        initial_ids = [DEVICE_ID, SECOND_ID]
+        all_ids = [DEVICE_ID, SECOND_ID, new_id]
+        settings = {"SHELLY_CLOUD_URL": "https://cloud.example.test", "SHELLY_CLOUD_KEY": "test-key"}
+        # Run at startup, just before the refresh is due, and at the next refresh.
+        times = [0, 0, AREA_REFRESH_SECONDS - 1, AREA_REFRESH_SECONDS, AREA_REFRESH_SECONDS]
+        with patch.dict(os.environ, settings, clear=True), patch("shelly.CloudClient") as client_class, \
+                patch("shelly.Event") as event_class, patch("shelly.signal.signal"), \
+                patch("shelly.time.monotonic", side_effect=times):
+            event = event_class.return_value
+            event.is_set.side_effect = [False, False, False, True]
+            event.wait.return_value = False
+            client = client_class.return_value
+            client.discover.side_effect = [dict.fromkeys(initial_ids), dict.fromkeys(all_ids)]
+            client.app_names.side_effect = [
+                {DEVICE_ID: "Study", SECOND_ID: "Bedroom"},
+                {DEVICE_ID: "Office", SECOND_ID: "Bedroom", new_id: "Kitchen"},
+            ]
+            old_status = [{"id": device_id, "status": {"tmp": {"tC": 20}}} for device_id in initial_ids]
+            new_status = old_status + [{"id": new_id, "status": {"tmp": {"tC": 19}}}]
+            client.fetch.side_effect = [old_status, old_status, new_status]
+            collect(self.archive)
+
+        self.assertEqual([call.kwargs["include_names"] for call in client.fetch.call_args_list], [True, False, True])
+        self.assertEqual(self.archive.configured_areas(), [
+            ("area-1", "Office", DEVICE_ID), ("area-2", "Bedroom", SECOND_ID), ("area-3", "Kitchen", new_id),
+        ])
+        overview = self.archive.overview()
+        self.assertEqual(overview["areas"][0]["limits"]["temperature_max"], 22)
+        self.assertEqual(self.archive.history("area-1", "7d")["points"][0]["at"], self.now)
+        self.assertEqual(self.archive.history("area-3", "7d")["points"][0]["temperature"], 19)
 
 
 if __name__ == "__main__":

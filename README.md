@@ -29,7 +29,7 @@ Open [the dashboard](http://127.0.0.1:8766/). A configured slug such as `area-1`
 
 ### Device discovery
 
-At startup the collector looks for Gen1 H&T sensors owned by your account using the [Shelly Cloud inventory endpoint](https://shelly-api-docs.shelly.cloud/cloud-control-api/real-time-events/#list-of-currentlast-known-statuses-of--owned-devices). It prefers the device name from Shelly Smart Control and can use the assigned room name when the device has no name. When Shelly doesn't return usable labels, the dashboard keeps the previous name or assigns a numbered label. Restart the collector with `docker compose restart collector` after adding or renaming a device in Shelly. If discovery is temporarily unavailable, the collector can keep checking previously configured devices.
+The collector looks for Gen1 H&T sensors owned by your account at startup, then refreshes the list and names about every five minutes. It uses the assigned room name in Shelly Smart Control, then the device name if there is no room name. If Shelly temporarily fails to return its room or device list, the dashboard keeps the names it already has. Sensor history, alert limits and dashboard URLs stay with the device when you rename a room or move the sensor. [Shelly Cloud inventory documentation](https://shelly-api-docs.shelly.cloud/cloud-control-api/real-time-events/#list-of-currentlast-known-statuses-of--owned-devices)
 
 If you want to select specific sensors or discovery fails, set `SHELLY_DEVICE_IDS` in `.env`. Copy each **Device ID** from **Settings → Device Information** in the Shelly app. For example, `SHELLY_DEVICE_IDS=000000000001,000000000002`. Run `docker compose up -d` after changing `.env` to apply it.
 
