@@ -31,6 +31,8 @@ Open [the dashboard](http://127.0.0.1:8766/). A configured slug such as `area-1`
 
 The collector looks for Gen1 H&T sensors owned by your account at startup, then refreshes the list and names about every five minutes. It uses the assigned room name in Shelly Smart Control, then the device name if there is no room name. If Shelly temporarily fails to return its room or device list, the dashboard keeps the names it already has. Sensor history, alert limits and dashboard URLs stay with the device when you rename a room or move the sensor. [Shelly Cloud inventory documentation](https://shelly-api-docs.shelly.cloud/cloud-control-api/real-time-events/#list-of-currentlast-known-statuses-of--owned-devices)
 
+Shelly can deny access to Smart Control room names even when sensor reads succeed. In that case the collector keeps recording readings and uses any available device names for new areas.
+
 If you want to select specific sensors or discovery fails, set `SHELLY_DEVICE_IDS` in `.env`. Copy each **Device ID** from **Settings → Device Information** in the Shelly app. For example, `SHELLY_DEVICE_IDS=000000000001,000000000002`. Run `docker compose up -d` after changing `.env` to apply it.
 
 ## How collection works

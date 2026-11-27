@@ -31,7 +31,7 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(urlsplit(request.full_url).path, "/v2/devices/api/get")
         self.assertEqual(parse_qs(urlsplit(request.full_url).query), {"auth_key": ["demo+key&value"]})
         self.assertEqual(json.loads(request.data), {"ids": [DEVICE_ID, SECOND_ID], "select": ["status"]})
-        client.opener.open.side_effect = HTTPError(request.full_url, 401, "unauthorized", {}, None)
+        client.opener.open.side_effect = HTTPError(request.full_url, 401, "unauthorized", {}, BytesIO())
         with self.assertRaisesRegex(CloudError, r"^Shelly Cloud returned HTTP 401\. Check the cloud URL and key\.$"):
             client.fetch([DEVICE_ID])
 
@@ -70,7 +70,7 @@ class CloudTest(unittest.TestCase):
 
     def test_app_names_prefer_assigned_room_over_device_name(self):
         client = CloudClient("https://cloud.example.test", "test-key")
-        client.post = MagicMock(side_effect=[
+        client.request_json = MagicMock(side_effect=[
             {"data": {"devices": {
                 DEVICE_ID.upper(): {"name": "Workshop"},
                 str(int(SECOND_ID, 16)): {"name": "Greenhouse sensor", "room_id": 42},
@@ -82,10 +82,14 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(client.app_names([DEVICE_ID, SECOND_ID], stop), {
             DEVICE_ID: "Workshop", SECOND_ID: "Greenhouse",
         })
-        self.assertEqual([call.args[0] for call in client.post.call_args_list], [
+        requests = [call.args[0] for call in client.request_json.call_args_list]
+        self.assertEqual([urlsplit(request.full_url).path for request in requests], [
             "/interface/device/list", "/interface/room/list",
         ])
-        client.post.side_effect = CloudError("Unavailable")
+        for request in requests:
+            self.assertEqual(request.get_method(), "GET")
+            self.assertEqual(parse_qs(urlsplit(request.full_url).query), {"auth_key": ["test-key"]})
+        client.request_json.side_effect = CloudError("Unavailable")
         with self.assertRaisesRegex(CloudError, "Unavailable"):
             client.app_names([DEVICE_ID], stop)
 
@@ -258,11 +262,13 @@ class ArchiveTest(unittest.TestCase):
         self.assertEqual(self.archive.configured_areas(), AREAS)
 
     def test_room_lookup_failure_preserves_labels_and_records_readings(self):
-        with self.assertLogs(level="WARNING"):
+        with self.assertLogs(level="WARNING") as logs:
             self.run_poll({}, {DEVICE_ID: "Device name", SECOND_ID: None}, [
                 {"id": DEVICE_ID, "settings": {"name": "Device name"}, "status": {"tmp": {"tC": 21}}},
                 {"id": SECOND_ID, "status": {"tmp": {"tC": 18}}},
-            ], app_names=CloudError("Room listing unavailable"))
+            ], app_names=CloudError("Check the cloud URL and key.", http_status=401))
+        self.assertIn("Sensor reads succeeded", logs.output[0])
+        self.assertNotIn("Check the cloud URL and key", logs.output[0])
         self.assertEqual(self.archive.configured_areas(), AREAS)
         self.assertEqual(self.archive.overview()["areas"][0]["temperature"], 21)
 

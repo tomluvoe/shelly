@@ -81,7 +81,9 @@ def assign_areas(ids, existing, inventory, payload, app_names):
 
 
 class CloudError(Exception):
-    pass
+    def __init__(self, message, *, http_status=None):
+        super().__init__(message)
+        self.http_status = http_status
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -165,8 +167,9 @@ class CloudClient:
         return names
 
     def app_listing(self, resource, key):
-        body = urlencode({"auth_key": self.key}).encode()
-        response = self.post(f"/interface/{resource}/list", body, "application/x-www-form-urlencoded")
+        query = urlencode({"auth_key": self.key})
+        request = Request(f"{self.base}/interface/{resource}/list?{query}")
+        response = self.request_json(request)
         listing = as_object(as_object(response).get("data")).get(key)
         if not isinstance(listing, dict):
             raise CloudError(f"Shelly Cloud did not return the Smart Control {resource} list.")
@@ -174,6 +177,9 @@ class CloudClient:
 
     def post(self, path, body, content_type):
         request = Request(self.base + path, data=body, headers={"Content-Type": content_type}, method="POST")
+        return self.request_json(request)
+
+    def request_json(self, request):
         try:
             with self.opener.open(request, timeout=15) as response:
                 content = response.read(MAX_RESPONSE + 1)
@@ -183,7 +189,7 @@ class CloudClient:
         except HTTPError as error:
             error.close()
             hint = " Check the cloud URL and key." if error.code in (401, 403) else ""
-            raise CloudError(f"Shelly Cloud returned HTTP {error.code}.{hint}") from None
+            raise CloudError(f"Shelly Cloud returned HTTP {error.code}.{hint}", http_status=error.code) from None
         except (OSError, ValueError) as error:
             message = "Shelly Cloud returned invalid JSON." if isinstance(error, ValueError) else "Could not reach Shelly Cloud."
             raise CloudError(message) from None
@@ -311,6 +317,7 @@ def collect(archive):
     archive.initialize(DEMO_AREAS if demo else None, interval, demo)
     areas = DEMO_AREAS if demo else archive.configured_areas()
     next_area_refresh = 0.0
+    names_auth_denied = False
     stop = Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
@@ -350,8 +357,19 @@ def collect(archive):
                 try:
                     app_names = client.app_names(ids, stop)
                 except CloudError as error:
-                    logging.warning("Could not refresh Smart Control names. %s", error)
+                    if error.http_status in (401, 403):
+                        if not names_auth_denied:
+                            logging.warning(
+                                "Shelly rejected access to Smart Control names (HTTP %d). "
+                                "Sensor reads succeeded. Keeping saved labels and using device names for new areas.",
+                                error.http_status,
+                            )
+                        names_auth_denied = True
+                    else:
+                        logging.warning("Could not refresh Smart Control names. %s", error)
                     app_names = None
+                else:
+                    names_auth_denied = False
                 updated_areas = assign_areas(ids, areas, inventory or {}, payload, app_names)
                 next_area_refresh = time.monotonic() + AREA_REFRESH_SECONDS
             changed = updated_areas != areas
